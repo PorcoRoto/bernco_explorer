@@ -20,7 +20,8 @@ SETUP / FIRST RUN
    LUC_MSG_VALUE below.
 3. python3 bernco_countywide_search-by_LUC_MSG.py
 """
-
+    
+import pandas as pd
 import sys
 import requests
 import openpyxl
@@ -34,7 +35,8 @@ DISCOVER_FIELDS_ONLY = False
 # Exact LUC_MSG value to match. Confirmed ALL CAPS text from a live sample
 # (e.g. "VACANT RESIDENTIAL"). Edit this single line to pull any other
 # land-use category — just change the text to the exact LUC_MSG wording.
-LUC_MSG_VALUE = "MULTIFAMILY RES U4U"
+# LUC_MSG_VALUE = "MULTIFAMILY RES U4U"
+# LUC_MSG_VALUE = "RES EXEMPT SFR"
 
 # Leave both as None for a full countywide search.
 # Otherwise supply EITHER:
@@ -42,8 +44,19 @@ LUC_MSG_VALUE = "MULTIFAMILY RES U4U"
 #   - OR a plain address string, e.g. "10500 Eagle Rock Ave NE, Albuquerque, NM"
 #     (the script will geocode it automatically via the free US Census
 #     geocoder — no API key needed)
-NW_CORNER = None   # (lat, lon) OR "address string"
-SE_CORNER = None   # (lat, lon) OR "address string"
+# NW_CORNER = (35.13095306170419, -106.58647301850368)   # (lat, lon) OR "address string"
+# SE_CORNER = (35.11640370749068, -106.56890991351301)   # (lat, lon) OR "address string"
+
+# LUC_MSG_VALUE = None   # skip the LUC filter
+# Replace the single string with a list
+LUC_MSG_VALUES = ['RES 2 SFR ON PARCEL', 'RES 3 SFR ON PARCEL', 'RES 4 SFR ON PARCEL', 'RETAIL SINGLE OCCUPANCY',
+                  'RES EXEMPT SFR', 'RESIDENTIAL IMPROVED', 'RESIDENTIAL WITH MINOR COM/ CLASSED RES'
+    # "SINGLE FAMILY RESIDENTIAL",
+    # "SINGLE FAMILY RES",
+    # ...add every variant you found in the distinct-values query
+]
+NW_CORNER = (35.11969574827306, -106.58114212697265)
+SE_CORNER = (35.11719244911946, -106.5803025955845)   # tiny box around your home
 
 # Fields to pull and write to the spreadsheet. These are confirmed real
 # field names from the live layer (discovery run). Add/remove as needed.
@@ -59,7 +72,8 @@ PARCEL_FIELDS = [
     "TAXDIST", "TAXYR",
 ]
 
-OUTPUT_FILE = "BernCo_Countywide_MultiFamilyResU4U.xlsx"
+# OUTPUT_FILE = "BernCo_Countywide_MultiFamilyResU4U.xlsx"
+OUTPUT_FILE = "myblock.parquet"
 
 # ─── SERVICE CONFIG (do not normally need to edit) ─────────────────────────
 
@@ -162,7 +176,15 @@ def build_bbox_geometry():
 
 
 def fetch_all_pages():
-    where_clause = f"LUC_MSG = '{LUC_MSG_VALUE}'"
+    def build_where_clause():
+        quoted = ", ".join(f"'{v}'" for v in LUC_MSG_VALUES)
+        return f"LUC_MSG IN ({quoted})"
+    if LUC_MSG_VALUES:
+        where_clause = build_where_clause()
+    else:
+        where_clause = "1=1"   # ArcGIS convention for "no filter"
+    # where_clause = build_where_clause()
+    # where_clause = f"LUC_MSG = '{LUC_MSG_VALUES}'"
     geometry, geom_sr, nw_resolved, se_resolved = build_bbox_geometry()
 
     all_rows = []
@@ -210,33 +232,52 @@ def fetch_all_pages():
 
     return all_rows
 
+def build_dataframe(all_rows, output_path):
+    df = pd.DataFrame(all_rows)
+    # Ensure every requested field exists, even if the server omitted it
+    for field in PARCEL_FIELDS:
+        if field not in df.columns:
+            df[field] = None
+    df = df[PARCEL_FIELDS]   # stable column order
 
-def build_xlsx(all_rows, output_path):
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Parcels"
+    # Coerce obvious numeric columns so Parquet preserves types
+    numeric_cols = ["ACREAGE", "LANDVALUE", "IMPTVALUE", "TOTVALUE",
+                    "IMPTTXBLE", "LANDTXBLE", "TOTTXBLE", "TAXYR"]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    header_fill = PatternFill("solid", fgColor="185FA5")
-    header_font = Font(bold=True, color="FFFFFF", name="Arial", size=10)
-    for col_idx, header in enumerate(PARCEL_FIELDS, start=1):
-        cell = ws.cell(row=1, column=col_idx, value=header)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center")
+    df.to_parquet(output_path, index=False)
+    # Also drop a CSV alongside for quick eyeballing
+    df.to_csv(output_path.replace(".parquet", ".csv"), index=False)
+    print(f"\nSaved: {output_path} and .csv ({len(df)} rows)")
 
-    data_font = Font(name="Arial", size=10)
-    for row_idx, record in enumerate(all_rows, start=2):
-        for col_idx, field in enumerate(PARCEL_FIELDS, start=1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=record.get(field, ""))
-            cell.font = data_font
+# def build_xlsx(all_rows, output_path):
+#     wb = openpyxl.Workbook()
+#     ws = wb.active
+#     ws.title = "Parcels"
 
-    for col in ws.columns:
-        max_len = max((len(str(c.value)) if c.value else 0) for c in col)
-        ws.column_dimensions[col[0].column_letter].width = min(max(max_len + 2, 10), 40)
+#     header_fill = PatternFill("solid", fgColor="185FA5")
+#     header_font = Font(bold=True, color="FFFFFF", name="Arial", size=10)
+#     for col_idx, header in enumerate(PARCEL_FIELDS, start=1):
+#         cell = ws.cell(row=1, column=col_idx, value=header)
+#         cell.fill = header_fill
+#         cell.font = header_font
+#         cell.alignment = Alignment(horizontal="center")
 
-    ws.freeze_panes = "A2"
-    wb.save(output_path)
-    print(f"\nSaved: {output_path}  ({len(all_rows)} rows)")
+#     data_font = Font(name="Arial", size=10)
+#     for row_idx, record in enumerate(all_rows, start=2):
+#         for col_idx, field in enumerate(PARCEL_FIELDS, start=1):
+#             cell = ws.cell(row=row_idx, column=col_idx, value=record.get(field, ""))
+#             cell.font = data_font
+
+#     for col in ws.columns:
+#         max_len = max((len(str(c.value)) if c.value else 0) for c in col)
+#         ws.column_dimensions[col[0].column_letter].width = min(max(max_len + 2, 10), 40)
+
+#     ws.freeze_panes = "A2"
+#     wb.save(output_path)
+#     print(f"\nSaved: {output_path}  ({len(all_rows)} rows)")
 
 
 def main():
@@ -253,7 +294,7 @@ def main():
         print("= True and inspect a few real records' LUC_MSG values if unsure.")
         return
 
-    build_xlsx(rows, output_path=OUTPUT_FILE)
+    build_dataframe(rows, output_path=OUTPUT_FILE)
 
 
 if __name__ == "__main__":
