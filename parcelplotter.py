@@ -79,81 +79,6 @@ def _normalize_number(value):
     return s
 
 
-# ─── Step 1: fetch attributes (returns DataFrame, optionally saves Parquet) ─
-# def fetch_parcel_attributes(nw_corner, se_corner, luc_msg_values,
-#                             output_parquet=None):
-#     """
-#     Query the Bernalillo County parcel layer for parcels inside the bbox
-#     whose LUC_MSG is in `luc_msg_values`. Returns a pandas DataFrame of
-#     attributes. If `output_parquet` is given, also saves it there.
-#     """
-#     nw_lat, nw_lon = nw_corner
-#     se_lat, se_lon = se_corner
-#     envelope = {
-#         "xmin": min(nw_lon, se_lon),
-#         "ymin": min(nw_lat, se_lat),
-#         "xmax": max(nw_lon, se_lon),
-#         "ymax": max(nw_lat, se_lat),
-#         "spatialReference": {"wkid": 4326},
-#     }
-
-#     if luc_msg_values:
-#         quoted = ", ".join(f"'{v}'" for v in luc_msg_values)
-#         where_clause = f"LUC_MSG IN ({quoted})"
-#     else:
-#         where_clause = "1=1"
-
-#     all_rows = []
-#     offset = 0
-#     while True:
-#         params = {
-#             "where": where_clause,
-#             "geometry": json.dumps(envelope),
-#             "geometryType": "esriGeometryEnvelope",
-#             "inSR": 4326,
-#             "spatialRel": "esriSpatialRelIntersects",
-#             "outFields": ",".join(PARCEL_FIELDS),
-#             "returnGeometry": "false",
-#             "f": "json",
-#             # "resultRecordCount": 2000,
-#             # "resultOffset": 2000,
-#             "resultRecordCount": PAGE_SIZE,
-#             "resultOffset": offset,
-#         }
-#         # resp = requests.get(PARCEL_SERVICE, params=params, timeout=120)
-#         print("URL:", PARCEL_SERVICE)
-#         print("Data length:", len(str(params)))
-#         resp = requests.post(PARCEL_SERVICE, data=params, timeout=120)
-#         # print(resp.status_code)
-#         # print(resp.text[:500])  # first 500 chars
-#         resp.raise_for_status()
-#         data = resp.json()
-#         if "error" in data:
-#             raise RuntimeError(f"Service error: {data['error']}")
-
-#         features = data.get("features", [])
-#         all_rows.extend(f["attributes"] for f in features)
-
-#         # if not data.get("exceededTransferLimit") and len(features) < PAGE_SIZE:
-#         if not data.get("exceededTransferLimit"):
-#             break
-#         offset += PAGE_SIZE
-
-#     df = pd.DataFrame(all_rows)
-#     if df.empty:
-#         return df
-
-#     # Coerce numerics so Parquet preserves types
-#     for col in ["ACREAGE", "LANDVALUE", "IMPTVALUE", "TOTVALUE",
-#                 "IMPTTXBLE", "LANDTXBLE", "TOTTXBLE", "TAXYR"]:
-#         if col in df.columns:
-#             df[col] = pd.to_numeric(df[col], errors="coerce")
-
-#     if output_parquet:
-#         df.to_parquet(output_parquet, index=False)
-
-#     return df
-
 def fetch_parcel_attributes(nw_corner, se_corner, luc_msg_values, output_parquet=None):
     ids, oid_field = fetch_all_parcel_ids(nw_corner, se_corner, luc_msg_values)
     if not ids:
@@ -189,48 +114,6 @@ def fetch_parcel_attributes(nw_corner, se_corner, luc_msg_values, output_parquet
         df.to_parquet(output_parquet, index=False)
     return df
 
-
-# ─── Step 2: fetch geometry for a given set of UPCs ─────────────────────────
-# def fetch_parcel_geometry(nw_corner, se_corner, luc_msg_values):
-#     """
-#     Query the same layer but request polygons (GeoJSON) for parcels in the
-#     bbox matching the LUC_MSG values. Returns a GeoDataFrame with UPC and
-#     geometry only (join attributes separately).
-#     """
-#     nw_lat, nw_lon = nw_corner
-#     se_lat, se_lon = se_corner
-#     envelope = {
-#         "xmin": min(nw_lon, se_lon),
-#         "ymin": min(nw_lat, se_lat),
-#         "xmax": max(nw_lon, se_lon),
-#         "ymax": max(nw_lat, se_lat),
-#         "spatialReference": {"wkid": 4326},
-#     }
-
-#     if luc_msg_values:
-#         quoted = ", ".join(f"'{v}'" for v in luc_msg_values)
-#         where_clause = f"LUC_MSG IN ({quoted})"
-#     else:
-#         where_clause = "1=1"
-
-#     params = {
-#         "where": where_clause,
-#         "geometry": json.dumps(envelope),
-#         "geometryType": "esriGeometryEnvelope",
-#         "inSR": 4326,
-#         "spatialRel": "esriSpatialRelIntersects",
-#         "outFields": "UPC",
-#         "returnGeometry": "true",
-#         "outSR": 4326,
-#         "f": "geojson",
-#     }
-#     # resp = requests.get(PARCEL_SERVICE, params=params, timeout=120)
-#     resp = requests.post(PARCEL_SERVICE, data=params, timeout=120)
-#     resp.raise_for_status()
-
-#     # gpd.read_file accepts a file-like object; the raw bytes are GeoJSON
-#     gdf = gpd.read_file(io.BytesIO(resp.content))
-#     return gdf[["UPC", "geometry"]]
 
 def fetch_parcel_geometry(nw_corner, se_corner, luc_msg_values):
     ids, oid_field = fetch_all_parcel_ids(nw_corner, se_corner, luc_msg_values)
@@ -329,7 +212,12 @@ LUC_COLORS = [
     "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
     "#46f0f0", "#f032e6", "#bcf60c", "#fabebe", "#008080",
     "#e6beff", "#9a6324", "#fffac8", "#800000", "#aaffc3",
+    "#6A5682", "#374d4b", "#030C2D", "#f58231", "#911eb4",
+    "#46f0f0", "#f032e6", "#bcf60c", "#fabebe", "#008080",
+    "#e6beff", "#9a6324", "#fffac8", "#800000", "#aaffc3",
 ]
+
+# LUC_COLORS = [plt.cm.tab20(i) for i in range(20)]
 
 
 def build_parcel_explorer(default_center=(35.0844, -106.6504), default_zoom=11):
@@ -455,7 +343,6 @@ def build_parcel_explorer(default_center=(35.0844, -106.6504), default_zoom=11):
     # ── Fetch button and output area ───────────────────────────────────────
     fetch_button = widgets.Button(description="Fetch & Plot", button_style="success")
     output_area = widgets.Output()
-
     def on_fetch_clicked(_):
         with output_area:
             output_area.clear_output()
@@ -487,12 +374,17 @@ def build_parcel_explorer(default_center=(35.0844, -106.6504), default_zoom=11):
                 merged = gdf.merge(df, on="UPC", how="inner")
                 print(f"Plotting {len(merged)} parcels...")
 
-                # Remove any previous parcel layer
+                # Remove any previous parcel layers, legends, and layer controls
                 for layer in list(m.layers):
-                    if isinstance(layer, ipyleaflet.GeoData):
+                    if isinstance(layer, (ipyleaflet.GeoData, ipyleaflet.GeoJSON)) and layer.name != "click_catcher":
                         m.remove_layer(layer)
+                for ctrl in list(m.controls):
+                    if isinstance(ctrl, (ipyleaflet.LayersControl, ipyleaflet.LegendControl)):
+                        m.remove_control(ctrl)
 
-                # Render each LUC_MSG group as its own GeoData layer
+                # ── Render each LUC_MSG group as its own layer ──────────────────────────
+                luc_counts = {}   # {luc: (count, color)}
+
                 for i, luc in enumerate(lus):
                     subset = merged[merged["LUC_MSG"] == luc]
                     if subset.empty:
@@ -510,14 +402,93 @@ def build_parcel_explorer(default_center=(35.0844, -106.6504), default_zoom=11):
                         name=luc,
                     )
                     m.add_layer(geo_layer)
+                    luc_counts[luc] = (len(subset), color)
 
-                # Add a legend-ish layer control so the user can toggle groups
-                if not any(isinstance(c, ipyleaflet.LayersControl) for c in m.controls):
-                    m.add_control(ipyleaflet.LayersControl(position="topright"))
+                # ── Build legend, sorted most → fewest ──────────────────────────────────
+                if luc_counts:
+                    sorted_items = sorted(luc_counts.items(), key=lambda kv: kv[1][0], reverse=True)
+
+                    legend_html = (
+                        "<div style='font-size:11px; background:white; padding:6px 8px; "
+                        "border-radius:4px; box-shadow:0 1px 4px rgba(0,0,0,0.3); "
+                        "max-height:300px; overflow-y:auto;'>"
+                        "<b style='font-size:12px;'>LUC_MSG Categories</b><br>"
+                    )
+                    for luc, (count, color) in sorted_items:
+                        legend_html += (
+                            f"<div style='display:flex; align-items:center; margin:2px 0;'>"
+                            f"<span style='display:inline-block; width:12px; height:12px; "
+                            f"background:{color}; margin-right:5px; border:1px solid #999;'></span>"
+                            f"<span>{luc} ({count})</span>"
+                            f"</div>"
+                        )
+                    legend_html += "</div>"
+
+                    legend_widget = widgets.HTML(value=legend_html)
+                    legend_control = ipyleaflet.WidgetControl(
+                        widget=legend_widget,
+                        position="bottomright",
+                    )
+                    m.add_control(legend_control)
+                # legend_dict = {}
+                # for i, luc in enumerate(lus):
+                #     subset = merged[merged["LUC_MSG"] == luc]
+                #     if subset.empty:
+                #         continue
+                #     color = LUC_COLORS[i % len(LUC_COLORS)]
+                #     # Add layer (this part remains unchanged)
+                #     geo_layer = ipyleaflet.GeoData(
+                #         geo_dataframe=subset[["UPC", "geometry"]],
+                #         style={
+                #             "color": color,
+                #             "fillColor": color,
+                #             "opacity": 1.0,
+                #             "fillOpacity": 0.6,
+                #             "weight": 1.5,
+                #             },
+                #         name=luc,
+                #     )
+                #     m.add_layer(geo_layer)
+                #     # Key change: add to dictionary, not list
+                #     legend_dict[f"{luc} ({len(subset)})"] = color
+
+                # # Replace the original LegendControl code block
+                # if legend_dict:
+                #     # Manually build HTML legend, control font size and style with CSS
+                #     legend_html = "<div style='font-size:11px; background:white; padding:6px 8px; border-radius:4px; box-shadow:0 1px 4px rgba(0,0,0,0.3); max-height:300px; overflow-y:auto;'>"
+                #     legend_html += "<b style='font-size:12px;'>LUC_MSG Categories</b><br>"
+                #     for label, color in legend_dict.items():
+                #         legend_html += (
+                #             f"<div style='display:flex; align-items:center; margin:2px 0;'>"
+                #             f"<span style='display:inline-block; width:12px; height:12px; "
+                #             f"background:{color}; margin-right:5px; border:1px solid #999;'></span>"
+                #             f"<span>{label}</span>"
+                #             f"</div>"
+                #         )
+                #     legend_html += "</div>"
+
+                #     legend_widget = widgets.HTML(value=legend_html)
+                #     legend_control = ipyleaflet.WidgetControl(
+                #         widget=legend_widget,
+                #         position="bottomright"
+                #     )
+                #     m.add_control(legend_control)
+                # # # Add legend
+                # # if legend_dict:
+                # #     legend = ipyleaflet.LegendControl(
+                # #         legend_dict,                    # first positional argument: dictionary
+                # #         title="LUC_MSG Categories",
+                # #         position="bottomright"
+                # #     )
+                #     m.add_control(legend)
+
+                # Add layer toggle control
+                m.add_control(ipyleaflet.LayersControl(position="topright"))
 
                 print("Done.")
             except Exception as e:
                 print(f"Error: {e}")
+
 
     fetch_button.on_click(on_fetch_clicked)
 
