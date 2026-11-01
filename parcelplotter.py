@@ -40,6 +40,53 @@ PARCEL_FIELDS = [
     "TAXDIST", "TAXYR",
 ]
 
+# ─── Preset LUC_MSG groups for the UI ────────────────────────────────────────
+# Edit these lists as you learn more about the categories in your data.
+# Each key becomes a checkbox label in the UI; the value is the list of
+# LUC_MSG strings that should be selected when that preset is checked.
+LUC_PRESETS = {
+    "Houses": [
+        "RESIDENTIAL IMPROVED",
+        "RESIDENTIAL WITH MINOR COM/ CLASSED RES",
+        "RES 2 SFR ON PARCEL <-- SINGLE FAMILY",
+        "RES 3 SFR ON PARCEL <-- SINGLE FAMILY",
+        "RES 4 SFR ON PARCEL <-- SINGLE FAMILY",
+        "RES EXEMPT SFR <-- SINGLE FAMILY",
+        "RES HIGH TRAFFIC",
+        "MULTIFAMILY RES U4U",
+        "SHORT TERM RENTAL",
+        "TOWNHOME COMMON AREA",
+        "TOWNHOUSE",
+        "OBY ONLY",
+        "MOBILE HOME PARK",
+        "LOW RISE APARTMENTS O4U (TO 3 STY)",
+        "VACANT RESIDENTIAL",
+    ],
+    "Apartments": [
+        "RETAIL CONDOMINIUM",
+        "RETAIL MULTI-OCCUPANCY",
+        "RETAIL SINGLE OCCUPANCY <-- SINGLE FAMILY",
+    ],
+    "Vacant Listings": [
+        "VAC COMMERCIAL COMMON AREA",
+        "VACANT COMMERCIAL",
+        "VACANT CONTAMINATED",
+        "VACANT EXEMPT",
+        "VACANT LANDFILL CONTAMINATED LAND",
+        "VACANT LANDLOCKED",
+        "VACANT LOT FOR MH (WITH UTILITIES)",
+        "VACANT OPEN SPACE",
+        "VACANT RES W/ IMPROVEMENT W/ NO VALUE",
+        "VACANT RESIDENTIAL",
+        "VACANT RURAL FRINGES",
+        "VACANT SFD GOLF COURSE LOT",
+        "VACANT TOWNHOUSE",
+    ],
+    "All Housing": [
+            "MULTIFAMILY RES U4U",
+    ],
+}
+
 # ─── Address normalization helpers ──────────────────────────────────────────
 _SUFFIX_MAP = {
     "ST": "STREET", "STR": "STREET", "AVE": "AVENUE", "AV": "AVENUE",
@@ -54,6 +101,8 @@ _DIR_MAP = {
     "NE": "NORTHEAST", "NW": "NORTHWEST",
     "SE": "SOUTHEAST", "SW": "SOUTHWEST",
 }
+
+
 
 def _normalize_street(value):
     if value is None or (isinstance(value, float) and pd.isna(value)):
@@ -331,6 +380,7 @@ def build_parcel_explorer(default_center=(35.0844, -106.6504), default_zoom=11):
     except Exception as e:
         print(f"Could not fetch LUC_MSG list: {e}")
         luc_values = []
+        
 
     luc_selector = widgets.SelectMultiple(
         options=luc_values,
@@ -339,6 +389,45 @@ def build_parcel_explorer(default_center=(35.0844, -106.6504), default_zoom=11):
         layout=widgets.Layout(width="300px", height="400px"),
         disabled=False,
     )
+    
+    # ── Preset group checkboxes ──────────────────────────────────────────────
+    preset_checkboxes = {}
+    for label, values in LUC_PRESETS.items():
+        cb = widgets.Checkbox(
+            value=False,
+            description=label,
+            indent=False,
+            layout=widgets.Layout(width="300px"),
+        )
+        preset_checkboxes[label] = cb
+
+    def apply_preset(change):
+        """When a preset is toggled, select/deselect those values in the
+        multi-select. Existing selections outside the preset are preserved."""
+        if not change["new"]:
+            return  # only act on check, not uncheck
+
+        # Which preset was toggled?
+        toggled_label = next(
+            (lbl for lbl, cb in preset_checkboxes.items() if cb is change["owner"]),
+            None,
+        )
+        if toggled_label is None:
+            return
+
+        wanted = set(LUC_PRESETS[toggled_label])
+        current = set(luc_selector.value)
+
+        # Only keep values that actually exist in the selector's options
+        available = set(luc_selector.options)
+        valid_wanted = wanted & available
+
+        new_selection = current | valid_wanted
+        # Filter out anything not in options (ipywidgets requires this)
+        luc_selector.value = [v for v in luc_selector.options if v in new_selection]
+
+    for cb in preset_checkboxes.values():
+        cb.observe(apply_preset, names="value")
 
     # ── Fetch button and output area ───────────────────────────────────────
     fetch_button = widgets.Button(description="Fetch & Plot", button_style="success")
@@ -378,9 +467,14 @@ def build_parcel_explorer(default_center=(35.0844, -106.6504), default_zoom=11):
                 for layer in list(m.layers):
                     if isinstance(layer, (ipyleaflet.GeoData, ipyleaflet.GeoJSON)) and layer.name != "click_catcher":
                         m.remove_layer(layer)
+                # Remove all controls except the ones we want to keep permanently
+                KEEP_CONTROLS = (ipyleaflet.ZoomControl, ipyleaflet.ScaleControl, ipyleaflet.FullScreenControl)
                 for ctrl in list(m.controls):
-                    if isinstance(ctrl, (ipyleaflet.LayersControl, ipyleaflet.LegendControl)):
+                    if not isinstance(ctrl, KEEP_CONTROLS):
                         m.remove_control(ctrl)
+                # for ctrl in list(m.controls):
+                #     if isinstance(ctrl, (ipyleaflet.LayersControl, ipyleaflet.LegendControl)):
+                #         m.remove_control(ctrl)
 
                 # ── Render each LUC_MSG group as its own layer ──────────────────────────
                 luc_counts = {}   # {luc: (count, color)}
@@ -430,57 +524,7 @@ def build_parcel_explorer(default_center=(35.0844, -106.6504), default_zoom=11):
                         position="bottomright",
                     )
                     m.add_control(legend_control)
-                # legend_dict = {}
-                # for i, luc in enumerate(lus):
-                #     subset = merged[merged["LUC_MSG"] == luc]
-                #     if subset.empty:
-                #         continue
-                #     color = LUC_COLORS[i % len(LUC_COLORS)]
-                #     # Add layer (this part remains unchanged)
-                #     geo_layer = ipyleaflet.GeoData(
-                #         geo_dataframe=subset[["UPC", "geometry"]],
-                #         style={
-                #             "color": color,
-                #             "fillColor": color,
-                #             "opacity": 1.0,
-                #             "fillOpacity": 0.6,
-                #             "weight": 1.5,
-                #             },
-                #         name=luc,
-                #     )
-                #     m.add_layer(geo_layer)
-                #     # Key change: add to dictionary, not list
-                #     legend_dict[f"{luc} ({len(subset)})"] = color
 
-                # # Replace the original LegendControl code block
-                # if legend_dict:
-                #     # Manually build HTML legend, control font size and style with CSS
-                #     legend_html = "<div style='font-size:11px; background:white; padding:6px 8px; border-radius:4px; box-shadow:0 1px 4px rgba(0,0,0,0.3); max-height:300px; overflow-y:auto;'>"
-                #     legend_html += "<b style='font-size:12px;'>LUC_MSG Categories</b><br>"
-                #     for label, color in legend_dict.items():
-                #         legend_html += (
-                #             f"<div style='display:flex; align-items:center; margin:2px 0;'>"
-                #             f"<span style='display:inline-block; width:12px; height:12px; "
-                #             f"background:{color}; margin-right:5px; border:1px solid #999;'></span>"
-                #             f"<span>{label}</span>"
-                #             f"</div>"
-                #         )
-                #     legend_html += "</div>"
-
-                #     legend_widget = widgets.HTML(value=legend_html)
-                #     legend_control = ipyleaflet.WidgetControl(
-                #         widget=legend_widget,
-                #         position="bottomright"
-                #     )
-                #     m.add_control(legend_control)
-                # # # Add legend
-                # # if legend_dict:
-                # #     legend = ipyleaflet.LegendControl(
-                # #         legend_dict,                    # first positional argument: dictionary
-                # #         title="LUC_MSG Categories",
-                # #         position="bottomright"
-                # #     )
-                #     m.add_control(legend)
 
                 # Add layer toggle control
                 m.add_control(ipyleaflet.LayersControl(position="topright"))
@@ -501,6 +545,7 @@ def build_parcel_explorer(default_center=(35.0844, -106.6504), default_zoom=11):
         se_lat_box, se_lon_box,
         widgets.HTML("<hr>"),
         widgets.HTML("<h3>LUC_MSG Filter</h3>"),
+        *preset_checkboxes.values(), 
         luc_selector,
         fetch_button,
         output_area,
